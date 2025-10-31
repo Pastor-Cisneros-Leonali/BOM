@@ -1,0 +1,4 @@
+
+# Opcional: usar docker-compose.yml es suficiente.
+FROM postgres:15-alpine
+# Puedes agregar extensiones o scripts init si lo requieres.

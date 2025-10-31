@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ranch {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  plots     Plot[]
+  plantings Planting[] // <-- back-relation agregado
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Plot {
+  id        String     @id @default(cuid())
+  ranch     Ranch      @relation(fields: [ranchId], references: [id])
+  ranchId   String
+  name      String
+  hectares  Decimal    @db.Decimal(10, 2)
+  plantings Planting[]
+
+  @@unique([ranchId, name])
+}
+
+model Crop {
+  id        String     @id @default(cuid())
+  name      String
+  varieties Variety[]
+  recipes   Recipe[]
+  plantings Planting[] // <-- back-relation agregado
+
+  @@unique([name])
+}
+
+model Variety {
+  id        String     @id @default(cuid())
+  crop      Crop       @relation(fields: [cropId], references: [id])
+  cropId    String
+  name      String
+  recipes   Recipe[]
+  plantings Planting[] // <-- back-relation agregado
+
+  @@unique([cropId, name])
+}
+
+model Planting {
+  id             String         @id @default(cuid())
+  crop           Crop           @relation(fields: [cropId], references: [id])
+  cropId         String
+  variety        Variety?       @relation(fields: [varietyId], references: [id])
+  varietyId      String?
+  ranch          Ranch          @relation(fields: [ranchId], references: [id])
+  ranchId        String
+  plot           Plot           @relation(fields: [plotId], references: [id])
+  plotId         String
+  hectares       Decimal        @db.Decimal(10, 2)
+  sowingDate     DateTime
+  harvestDate    DateTime
+  sowingIsoWeek  String
+  harvestIsoWeek String
+  status         PlantingStatus @default(ACTIVE)
+  tabla          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([sowingDate])
+  @@index([harvestDate])
+}
+
+enum PlantingStatus {
+  ACTIVE
+  HARVESTED
+  CANCELLED
+}
+
+model Recipe {
+  id             String       @id @default(cuid())
+  name           String
+  classification RecipeClass
+  crop           Crop         @relation(fields: [cropId], references: [id])
+  cropId         String
+  variety        Variety?     @relation(fields: [varietyId], references: [id])
+  varietyId      String?
+  growthWeek     Int
+  items          RecipeItem[]
+  version        Int          @default(1)
+  isActive       Boolean      @default(true)
+  temporalidad   String? // <-- NUEVO (texto libre)
+  sowingType     String? // <-- NUEVO (texto libre)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([name, cropId, varietyId, growthWeek, version])
+  @@index([cropId, growthWeek])
+}
+
+enum RecipeClass {
+  FERTILIZANTE
+  AGROQUIMICO
+}
+
+model Product {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  unit        String
+  recipeItems RecipeItem[] // <-- back-relation agregado
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model RecipeItem {
+  id            String  @id @default(cuid())
+  recipe        Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  recipeId      String
+  product       Product @relation(fields: [productId], references: [id])
+  productId     String
+  qtyPerHectare Decimal @db.Decimal(10, 3)
+  notes         String?
+
+  @@unique([recipeId, productId])
+}
