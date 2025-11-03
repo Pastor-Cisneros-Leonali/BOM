@@ -10,20 +10,38 @@ type RecipeItemLite = { productId: string; qtyPerHectare: number | string; produ
 type RecipeWithItems = {
   id: string; name: string; cropId: string; varietyId: string | null;
   growthWeek: number; temporalidad: string | null; classification: ProdClass; items: RecipeItemLite[];
+  sowingType?: string | null; // 👈 NUEVO
 };
 
 // ---------------- helpers ----------------
+
+// 👇 NUEVO: detectar invernadero por nombre de rancho
+function isGreenhouseRanchName(name?: string | null): boolean {
+  if (!name) return false;
+  return /invernadero/i.test(name);
+}
+
+// 👇 NUEVO: normalizar sowingType
+function normalizeSowingType(s?: string | null): "INVERNADERO" | "CAMPO ABIERTO" | null {
+  if (!s) return null;
+  const t = s.trim().toUpperCase();
+  if (t === "INVERNADERO") return "INVERNADERO";
+  if (t === "CAMPO" || t === "CAMPO ABIERTO") return "CAMPO ABIERTO";
+  return null;
+}
+
 // Antes:
 // function pickRecipesByTemporalidad(cropId, varietyId, growthWeek, byKey, sowingDate): RecipeWithItems[]
 
-// Después:
+// Después: (añadimos desiredSowingType y weekStart/weekEnd)
 function pickRecipesByTemporalidad(
   cropId: string,
   varietyId: string | null,
   growthWeek: number,
   byKey: Map<string, RecipeWithItems[]>,
   weekStart: Date,
-  weekEnd: Date
+  weekEnd: Date,
+  desiredSowingType: "INVERNADERO" | "CAMPO ABIERTO" // 👈 NUEVO
 ): RecipeWithItems[] {
   const keyVar = `${cropId}|${varietyId ?? "null"}|${growthWeek}`;
   const keyGen = `${cropId}|null|${growthWeek}`;
@@ -33,14 +51,18 @@ function pickRecipesByTemporalidad(
   ];
   if (candidates.length === 0) return [];
 
+  // 👇 NUEVO: filtrar primero por tipo de siembra deseado
+  const byType = candidates.filter(r => normalizeSowingType(r.sowingType ?? null) === desiredSowingType);
+  if (byType.length === 0) return [];
+
   // 1) Filtra por temporalidad de la SEMANA (cualquier día del rango semanal)
-  const matching = candidates.filter(r =>
+  const matching = byType.filter(r =>
     temporalidadCoincideEnRango(r.temporalidad ?? null, weekStart, weekEnd)
   );
   if (matching.length) return matching;
 
   // 2) Fallback: ANUAL / sin temporalidad
-  const annualish = candidates.filter(
+  const annualish = byType.filter(
     r => !r.temporalidad || r.temporalidad.trim() === "" || r.temporalidad.toUpperCase() === "ANUAL"
   );
   if (annualish.length) return annualish;
@@ -148,7 +170,7 @@ export async function GET(req: NextRequest) {
   const rangeStart = (scope === "year") ? mondayYear : mondayWeek;
   const rangeEnd   = (scope === "year") ? sundayYear : sundayWeek;
 
-  // 1) Siembras vivas en el rango
+  // 1) Siembras vivas en el rango (👉 añadimos nombre de rancho)
   const plantings = await prisma.planting.findMany({
     where: {
       status: "ACTIVE",
@@ -160,6 +182,7 @@ export async function GET(req: NextRequest) {
     select: {
       id: true, cropId: true, varietyId: true, ranchId: true, plotId: true,
       hectares: true, sowingDate: true, harvestDate: true,
+      ranch: { select: { name: true } }, // 👈 NUEVO
     },
   });
 
@@ -199,7 +222,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 3) Prefetch recetas
+  // 3) Prefetch recetas (👉 aseguramos traer sowingType)
   const recipes = await prisma.recipe.findMany({
     where: {
       isActive: true,
@@ -277,14 +300,20 @@ export async function GET(req: NextRequest) {
   if (scope === "week") {
     for (const p of plantings) {
       const age = Math.max(1, diffIsoWeeks(new Date(p.sowingDate), mondayWeek) + 1);
+
+      // 👇 calcular tipo deseado según rancho
+      const greenhouse = isGreenhouseRanchName(p.ranch?.name);
+      const desired = greenhouse ? "INVERNADERO" as const : "CAMPO ABIERTO" as const;
+
       const recs = pickRecipesByTemporalidad(
-      p.cropId,
-      p.varietyId ?? null,
-      age,
-      byKey,
-      mondayWeek,
-      sundayWeek
-    );
+        p.cropId,
+        p.varietyId ?? null,
+        age,
+        byKey,
+        mondayWeek,
+        sundayWeek,
+        desired // 👈 NUEVO
+      );
 
       for (const rec of recs) {
         for (const it of (rec.items ?? [])) {
@@ -302,18 +331,26 @@ export async function GET(req: NextRequest) {
       // limitar semanas a [weekStart, weekEnd]
       for (let w = weekStart; w <= weekEnd; w++) {
         const weekMon = isoYearWeekToMonday(year, w);
+        const weekSun = new Date(weekMon); weekSun.setUTCDate(weekMon.getUTCDate() + 6); 
+
         // fuera del overlap siembra-cosecha => skip
         if (weekMon < mondayOf(new Date(p.sowingDate)) || weekMon > mondayOf(new Date(p.harvestDate))) continue;
 
         const age = Math.max(1, diffIsoWeeks(new Date(p.sowingDate), weekMon) + 1);
+
+        // 👇 calcular tipo deseado según rancho
+        const greenhouse = isGreenhouseRanchName(p.ranch?.name);
+        const desired = greenhouse ? "INVERNADERO" as const : "CAMPO ABIERTO" as const;
+
         const recs = pickRecipesByTemporalidad(
-        p.cropId,
-        p.varietyId ?? null,
-        age,
-        byKey,
-        mondayWeek,
-        sundayWeek
-      );
+          p.cropId,
+          p.varietyId ?? null,
+          age,
+          byKey,
+          weekMon,
+          weekSun,
+          desired
+        );
 
         if (recs.length === 0) continue;
 

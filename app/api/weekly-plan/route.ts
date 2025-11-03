@@ -3,11 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { isoWeekRange, growthWeekFor, isActiveInRange } from "@/lib/weeks";
 import { temporalidadCoincide } from "@/lib/temporalidad";
 
+// ✅ Helper: detectar si un rancho es invernadero por nombre
+function isGreenhouseRanchName(name?: string | null): boolean {
+  if (!name) return false;
+  return /invernadero/i.test(name); // ajusta si tienes una regla distinta
+}
+
+// ✅ Helper: normalizar sowingType
+function normalizeSowingType(s?: string | null): "INVERNADERO" | "CAMPO ABIERTO" | null {
+  if (!s) return null;
+  const t = s.trim().toUpperCase();
+  if (t === "INVERNADERO") return "INVERNADERO";
+  if (t === "CAMPO ABIERTO") return "CAMPO ABIERTO";
+  return null; // si viene algo raro, lo descartamos
+}
 
 // Valida si la temporalidad coincide con CUALQUIER día del rango semanal
 function temporalidadCoincideEnRango(temporalidad: string | null | undefined, start: Date, end: Date): boolean {
-  // Si es "Anual" o vacío, ya tu temporalidadCoincide() nos regresa true, pero
-  // igual hacemos la iteración por si en el futuro quieres cambiar esa regla.
   const oneDay = 24 * 60 * 60 * 1000;
   for (let t = start.getTime(); t <= end.getTime(); t += oneDay) {
     const d = new Date(t);
@@ -15,7 +27,6 @@ function temporalidadCoincideEnRango(temporalidad: string | null | undefined, st
   }
   return false;
 }
-
 
 export async function GET(req: NextRequest) {
   const iso = req.nextUrl.searchParams.get("iso");
@@ -81,40 +92,35 @@ export async function GET(req: NextRequest) {
     map.set(k, list);
   }
 
-  // Helper: prioriza recetas por temporalidad según la semana consultada (rango semanal)
-  function pickByTemporalidad(
-    list: typeof recipes[number][],
-    weekStart: Date,
-    weekEnd: Date
-  ) {
+  // Prioriza por temporalidad (como ya tenías)
+  function pickByTemporalidad(list: typeof recipes[number][], weekStart: Date, weekEnd: Date) {
     if (!list?.length) return [];
-
-    // 1) Coinciden con la temporalidad de la SEMANA (cualquier día del rango semanal)
     const matches = list.filter(r => temporalidadCoincideEnRango(r.temporalidad ?? null, weekStart, weekEnd));
     if (matches.length) return matches;
-
-    // 2) Fallback: ANUAL / sin temporalidad
     const annual = list.filter(
       r => !r.temporalidad || r.temporalidad.trim() === "" || r.temporalidad.toUpperCase() === "ANUAL"
     );
     if (annual.length) return annual;
-
-    // 3) Nada coincide
     return [];
   }
 
-
-  // 3) Armar respuesta por siembra
+  // 3) Armar respuesta por siembra con filtro por sowingType
   const result = alive.map(a => {
     const p = a.planting;
     const kSpec = key(p.cropId, p.varietyId, a.growthWeek); // variedad específica
     const kGen  = key(p.cropId, null, a.growthWeek);        // general del cultivo
-    
-    // Recetas candidatas (específicas + generales)
+
     const candidates = (map.get(kSpec) ?? []).concat(map.get(kGen) ?? []);
 
-    // Filtrar/priorizar por temporalidad según fecha de siembra
-    const effective = pickByTemporalidad(candidates, start, end);
+    // ✅ Filtrar por tipo de siembra según el rancho
+    const greenhouse = isGreenhouseRanchName(p.ranch?.name);
+    const wanted: "INVERNADERO" | "CAMPO ABIERTO" = greenhouse ? "INVERNADERO" : "CAMPO ABIERTO";
+
+    // Solo recetas cuyo sowingType normalizado coincide EXACTO con el deseado
+    const bySowingType = candidates.filter(r => normalizeSowingType(r.sowingType ?? null) === wanted);
+
+    // Luego aplica tu priorización por temporalidad dentro del subconjunto por tipo
+    const effective = pickByTemporalidad(bySowingType, start, end);
 
     const hectares = Number(p.hectares);
     const packages = effective.map(r => ({
@@ -123,6 +129,7 @@ export async function GET(req: NextRequest) {
       classification: r.classification,
       growthWeek: r.growthWeek,
       temporalidad: r.temporalidad ?? "Anual",
+      sowingType: normalizeSowingType(r.sowingType ?? null) ?? null, // opcional, por si quieres mostrarlo
       items: r.items.map(it => ({
         productId: it.productId,
         product: it.product.name,

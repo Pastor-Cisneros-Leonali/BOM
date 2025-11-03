@@ -16,7 +16,8 @@ export async function GET() {
     id: r.id,
     name: r.name,
     classification: r.classification,
-    temporalidad:r.temporalidad,
+    temporalidad: r.temporalidad,
+    sowingType: r.sowingType ?? null,
     growthWeek: r.growthWeek,
     crop: { id: r.cropId, name: r.crop.name },
     variety: r.variety ? { id: r.varietyId, name: r.variety.name } : null,
@@ -32,23 +33,29 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { name, classification, cropId, varietyId, growthWeek, items, temporalidad, } = body;
+  const { name, classification, cropId, varietyId, growthWeek, items, temporalidad, sowingType } = body;
 
   if (!name || !classification || !cropId || !growthWeek) {
     return NextResponse.json({ error: "Faltan campos obligatorios" }, { status: 400 });
   }
-    // Normalización: si viene vacío, guardar como null
+
+  // Normalización: si vienen vacíos, guardar como null
   const temporalidadNorm =
     typeof temporalidad === "string" && temporalidad.trim().length > 0
       ? temporalidad.trim()
       : null;
 
+  const sowingTypeNorm =
+    typeof sowingType === "string" && sowingType.trim().length > 0
+      ? sowingType.trim()
+      : null;
 
   const recipe = await prisma.recipe.create({
     data: {
       name,
       classification,
       temporalidad: temporalidadNorm,
+      sowingType: sowingTypeNorm,
       cropId,
       varietyId: varietyId ?? null,
       growthWeek: Number(growthWeek),

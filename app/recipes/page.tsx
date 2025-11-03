@@ -32,6 +32,8 @@ export default async function RecipesPage() {
               <th className="px-3 py-2">Cultivo</th>
               <th className="px-3 py-2">Variedad</th>
               <th className="px-3 py-2">Semana</th>
+              <th className="px-3 py-2">Temporalidad</th> {/* NUEVO */}
+              <th className="px-3 py-2">Tipo siembra</th> {/* NUEVO */}
               <th className="px-3 py-2">Ítems</th>
               <th className="px-3 py-2"></th>
             </tr>
@@ -44,6 +46,8 @@ export default async function RecipesPage() {
                 <td className="px-3 py-2">{r.crop?.name}</td>
                 <td className="px-3 py-2">{r.variety?.name ?? "—"}</td>
                 <td className="px-3 py-2">{r.growthWeek}</td>
+                <td className="px-3 py-2">{r.temporalidad ?? "—"}</td> {/* NUEVO */}
+                <td className="px-3 py-2">{r.sowingType ?? "—"}</td>   {/* NUEVO */}
                 <td className="px-3 py-2">{r.items.length}</td>
                 <td className="px-3 py-2 text-right">
                   <Link href={`/recipes/${r.id}`} className="text-blue-600 hover:underline">
@@ -54,7 +58,8 @@ export default async function RecipesPage() {
             ))}
             {data.length === 0 && (
               <tr>
-                <td className="px-3 py-6 text-center text-gray-500" colSpan={7}>
+                {/* Aumenta colSpan por las 2 columnas nuevas */}
+                <td className="px-3 py-6 text-center text-gray-500" colSpan={9}>
                   Aún no hay recetas. Crea la primera.
                 </td>
               </tr>

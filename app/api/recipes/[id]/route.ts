@@ -8,14 +8,16 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     include: { crop: true, variety: true, items: { include: { product: true } } }
   });
   if (!r) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   return NextResponse.json({
     id: r.id,
     name: r.name,
     classification: r.classification,
-    growthWeek: r.growthWeek,
+    growthWeek: Number(r.growthWeek),
     cropId: r.cropId,
     varietyId: r.varietyId,
     temporalidad: r.temporalidad ?? null,
+    sowingType: r.sowingType ?? null, // 👈 NUEVO
     items: r.items.map(it => ({
       id: it.id,
       productId: it.productId,
@@ -29,11 +31,39 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
-  const body = await req.json();
-  const { name, classification, cropId, varietyId, growthWeek, items, temporalidad } = body;
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Body inválido (JSON requerido)" }, { status: 400 });
+  }
+
+  const {
+    name,
+    classification,
+    cropId,
+    varietyId,
+    growthWeek,
+    items,
+    temporalidad,
+    sowingType, // 👈 NUEVO
+  } = body ?? {};
 
   const exists = await prisma.recipe.findUnique({ where: { id } });
   if (!exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Normalizaciones
+  const temporalidadNorm =
+    typeof temporalidad === "string" && temporalidad.trim().length > 0 ? temporalidad.trim() : null;
+
+  const sowingTypeNorm =
+    typeof sowingType === "string" && sowingType.trim().length > 0 ? sowingType.trim() : null;
+
+  // Validación mínima
+  if (!name || !classification || !cropId || !growthWeek) {
+    return NextResponse.json({ error: "Faltan campos obligatorios" }, { status: 400 });
+  }
 
   await prisma.$transaction([
     prisma.recipe.update({
@@ -44,7 +74,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         cropId,
         varietyId: varietyId ?? null,
         growthWeek: Number(growthWeek),
-        temporalidad: temporalidad ?? null,
+        temporalidad: temporalidadNorm,
+        sowingType: sowingTypeNorm, 
       },
     }),
     prisma.recipeItem.deleteMany({ where: { recipeId: id } }),
@@ -52,10 +83,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       data: (items ?? []).map((it: any) => ({
         recipeId: id,
         productId: it.productId,
-        qtyPerHectare: it.qtyPerHectare,
+        qtyPerHectare: Number(it.qtyPerHectare),
         notes: it.notes ?? null,
-      }))
-    })
+      })),
+      skipDuplicates: false,
+    }),
   ]);
 
   return NextResponse.json({ ok: true });
@@ -63,7 +95,6 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const { id } = params;
-  // Borrado duro (RecipeItem tiene onDelete: Cascade). Si prefieres lógico, usa isActive=false.
   await prisma.recipe.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }
